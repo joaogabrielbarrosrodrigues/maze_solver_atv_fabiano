@@ -39,7 +39,8 @@ def desenhar(tela, grid, caminho=None):
             cx = cell.i * TAM + TAM // 2
             cy = cell.j * TAM + TAM // 2
 
-            pygame.draw.circle(tela, VERDE, (cx, cy), TAM // 5)
+            pygame.draw.circle(tela, (180, 255, 180), (cx, cy), TAM // 6)
+            pygame.draw.circle(tela, VERDE, (cx, cy), TAM // 9)
 
 
 def desenhar_pontos(tela, inicio, fim):
