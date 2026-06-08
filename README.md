@@ -38,3 +38,5 @@ git clone URL_DO_SEU_REPOSITORIO
 
 py -3.11 -m pip install pygame
 py -3.11 main.py
+
+C:\Users\gabri\OneDrive\Desktop\Trabalho\Maze Repo\maze_solver_atv_fabiano\Maze_Solver> py -3.14 main.py
