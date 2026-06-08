@@ -1,8 +1,13 @@
 import pygame
 import sys
+import math
 
-from config import LARGURA, TAM, AZUL, PRETO, BRANCO
-
+from config import (
+    LARGURA, TAM,
+    FUNDO, BRANCO, PRETO,
+    COR_JOGADOR, COR_JOGADOR_BORDA, COR_BRILHO,
+    COR_FIM,
+)
 from maze_generator import criar_grid, gerar_labirinto
 from renderer import desenhar, desenhar_pontos
 from astar import a_star
@@ -12,126 +17,152 @@ pygame.init()
 
 tela = pygame.display.set_mode((LARGURA, LARGURA))
 pygame.display.set_caption("Maze Solver - A*")
+clock = pygame.time.Clock()
+
+# Velocidade da animação de movimento (pixels por frame)
+VELOCIDADE_ANIM = TAM * 0.18
 
 
 def mover_jogador(grid, jogador, tecla):
-    i, j = jogador.i, jogador.j
-
     movimentos = {
-        pygame.K_w: ("top", 0, -1),
-        pygame.K_s: ("bottom", 0, 1),
-        pygame.K_a: ("left", -1, 0),
-        pygame.K_d: ("right", 1, 0),
+        pygame.K_w: ("top",    0, -1),
+        pygame.K_s: ("bottom", 0,  1),
+        pygame.K_a: ("left",  -1,  0),
+        pygame.K_d: ("right",  1,  0),
     }
-
     if tecla not in movimentos:
         return jogador
 
     parede, di, dj = movimentos[tecla]
-
     if jogador.paredes[parede]:
         return jogador
 
+    i, j = jogador.i, jogador.j
     return grid[i + di][j + dj]
 
 
-def desenhar_jogador(tela, jogador):
-    x = jogador.i * TAM + TAM // 2
-    y = jogador.j * TAM // 2 + jogador.j * 0
-    y = jogador.j * TAM + TAM // 2
-
+def desenhar_jogador(tela, px, py, direcao, tick):
+    """Desenha o jogador na posição pixel (px, py) com olhos virados para 'direcao'."""
     raio = TAM // 3
 
-    pygame.draw.circle(tela, (20, 90, 255), (x, y), raio)
-    pygame.draw.circle(tela, (5, 30, 120), (x, y), raio, 2)
+    # Leve "bobbing" vertical (sobe/desce suavemente)
+    bob = math.sin(tick * 0.12) * 1.5
+    cx, cy = int(px), int(py + bob)
 
-    brilho_x = x - raio // 3
-    brilho_y = y - raio // 3
-    pygame.draw.circle(tela, (120, 180, 255), (brilho_x, brilho_y), max(3, raio // 4))
+    # Sombra
+    sombra = pygame.Surface((raio * 2 + 6, raio * 2 + 6), pygame.SRCALPHA)
+    pygame.draw.ellipse(sombra, (0, 0, 0, 60),
+                        (0, raio + 4, raio * 2 + 6, raio // 2))
+    tela.blit(sombra, (cx - raio - 3, cy - raio - 3 + raio + 6))
 
-    olho_raio = max(2, raio // 5)
-    pupila_raio = max(1, olho_raio // 2)
+    # Corpo
+    pygame.draw.circle(tela, COR_JOGADOR, (cx, cy), raio)
+    pygame.draw.circle(tela, COR_JOGADOR_BORDA, (cx, cy), raio, 2)
 
-    olho_esquerdo = (x - raio // 4, y - raio // 5)
-    olho_direito = (x + raio // 4, y - raio // 5)
+    # Brilho
+    pygame.draw.circle(tela, COR_BRILHO,
+                       (cx - raio // 3, cy - raio // 3),
+                       max(3, raio // 4))
 
-    pygame.draw.circle(tela, BRANCO, olho_esquerdo, olho_raio)
-    pygame.draw.circle(tela, BRANCO, olho_direito, olho_raio)
+    # Deslocamento dos olhos conforme direção
+    offsets = {
+        "right": ( 2, 0),
+        "left":  (-2, 0),
+        "down":  ( 0, 2),
+        "up":    ( 0,-2),
+    }
+    ox, oy = offsets.get(direcao, (0, 0))
 
-    pygame.draw.circle(tela, PRETO, olho_esquerdo, pupila_raio)
-    pygame.draw.circle(tela, PRETO, olho_direito, pupila_raio)
+    olho_r = max(2, raio // 5)
+    pupila_r = max(1, olho_r // 2)
+    olho_esq = (cx - raio // 4 + ox, cy - raio // 5 + oy)
+    olho_dir = (cx + raio // 4 + ox, cy - raio // 5 + oy)
 
-    boca_inicio = (x - raio // 3, y + raio // 4)
-    boca_fim = (x + raio // 3, y + raio // 4)
+    pygame.draw.circle(tela, BRANCO, olho_esq, olho_r)
+    pygame.draw.circle(tela, BRANCO, olho_dir, olho_r)
+    pygame.draw.circle(tela, PRETO, olho_esq, pupila_r)
+    pygame.draw.circle(tela, PRETO, olho_dir, pupila_r)
 
-    pygame.draw.line(tela, PRETO, boca_inicio, boca_fim, 2)
+    # Boca
+    pygame.draw.line(tela, PRETO,
+                     (cx - raio // 3, cy + raio // 4),
+                     (cx + raio // 3, cy + raio // 4), 2)
 
-def desenhar_mensagem_vitoria(tela):
-    fonte_titulo = pygame.font.SysFont("arial", 24, bold=True)
-    fonte_texto = pygame.font.SysFont("arial", 18)
 
-    mensagem = fonte_titulo.render("Parabéns! Voce venceu!", True, PRETO)
-    instrucao = fonte_texto.render("Pressione R para reiniciar", True, PRETO)
+def desenhar_vitoria(tela, tick):
+    # Overlay escuro semi-transparente pulsante
+    alpha = int(180 + 30 * math.sin(tick * 0.08))
+    overlay = pygame.Surface((LARGURA, LARGURA), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, alpha))
+    tela.blit(overlay, (0, 0))
 
-    largura_caixa = 360
-    altura_caixa = 100
-    x_caixa = (LARGURA - largura_caixa) // 2
-    y_caixa = (LARGURA - altura_caixa) // 2
+    fonte_titulo = pygame.font.SysFont("consolas", 32, bold=True)
+    fonte_sub    = pygame.font.SysFont("consolas", 18)
 
-    pygame.draw.rect(tela, BRANCO, (x_caixa, y_caixa, largura_caixa, altura_caixa))
-    pygame.draw.rect(tela, PRETO, (x_caixa, y_caixa, largura_caixa, altura_caixa), 2)
+    # Título com "glow" (renderiza atrás em cor mais escura levemente deslocado)
+    for dx, dy in [(-1,-1),(1,-1),(-1,1),(1,1)]:
+        sombra = fonte_titulo.render("Parabéns! Você venceu!", True, (0, 120, 80))
+        tela.blit(sombra, ((LARGURA - sombra.get_width())//2 + dx,
+                            LARGURA//2 - 40 + dy))
 
-    tela.blit(
-        mensagem,
-        (
-            (LARGURA - mensagem.get_width()) // 2,
-            y_caixa + 25
-        )
-    )
+    titulo = fonte_titulo.render("Parabéns! Você venceu!", True, (80, 255, 160))
+    sub    = fonte_sub.render("Pressione R para reiniciar", True, (200, 200, 220))
 
-    tela.blit(
-        instrucao,
-        (
-            (LARGURA - instrucao.get_width()) // 2,
-            y_caixa + 60
-        )
-    )
+    tela.blit(titulo, ((LARGURA - titulo.get_width()) // 2, LARGURA // 2 - 40))
+    tela.blit(sub,    ((LARGURA - sub.get_width()) // 2,    LARGURA // 2 + 10))
+
+
+def cell_center(cell):
+    return float(cell.i * TAM + TAM // 2), float(cell.j * TAM + TAM // 2)
 
 
 def main():
-
     grid = criar_grid()
-
     gerar_labirinto(grid)
 
     inicio = grid[0][0]
-    fim = grid[-1][-1]
+    fim    = grid[-1][-1]
     jogador = inicio
 
-    caminho = None
-    venceu = False
+    # Posição pixel atual do jogador (animação suave)
+    px, py = cell_center(inicio)
+
+    caminho  = None
+    venceu   = False
+    direcao  = "right"
+    tick     = 0
 
     rodando = True
-
     while rodando:
+        clock.tick(60)
+        tick += 1
 
+        # Interpola posição pixel em direção ao centro da célula alvo
+        alvo_x, alvo_y = cell_center(jogador)
+        dx, dy = alvo_x - px, alvo_y - py
+        dist = math.hypot(dx, dy)
+        if dist > VELOCIDADE_ANIM:
+            px += dx / dist * VELOCIDADE_ANIM
+            py += dy / dist * VELOCIDADE_ANIM
+        else:
+            px, py = alvo_x, alvo_y
+
+        # Desenho
         desenhar(tela, grid, caminho)
-
         desenhar_pontos(tela, inicio, fim)
-        desenhar_jogador(tela, jogador)
+        desenhar_jogador(tela, px, py, direcao, tick)
 
         if venceu:
-            desenhar_mensagem_vitoria(tela)
+            desenhar_vitoria(tela, tick)
 
         pygame.display.update()
 
+        # Eventos
         for event in pygame.event.get():
-
             if event.type == pygame.QUIT:
                 rodando = False
 
             if event.type == pygame.KEYDOWN:
-
                 if event.key in (pygame.K_w, pygame.K_a, pygame.K_s, pygame.K_d) and not venceu:
 
                     if caminho is None:
@@ -139,6 +170,14 @@ def main():
 
                     if jogador in caminho:
                         caminho.remove(jogador)
+
+                    mapa_dir = {
+                        pygame.K_w: "up",
+                        pygame.K_s: "down",
+                        pygame.K_a: "left",
+                        pygame.K_d: "right",
+                    }
+                    direcao = mapa_dir[event.key]
 
                     jogador = mover_jogador(grid, jogador, event.key)
 
@@ -149,17 +188,16 @@ def main():
                         venceu = True
 
                 elif event.key == pygame.K_r:
-
-                    grid = criar_grid()
-
+                    grid   = criar_grid()
                     gerar_labirinto(grid)
-
                     inicio = grid[0][0]
-                    fim = grid[-1][-1]
+                    fim    = grid[-1][-1]
                     jogador = inicio
-
+                    px, py  = cell_center(inicio)
                     caminho = None
-                    venceu = False
+                    venceu  = False
+                    direcao = "right"
+                    tick    = 0
 
     pygame.quit()
     sys.exit()
